@@ -1,0 +1,58 @@
+{
+  "name": "@agentionai/eval",
+  "version": "0.1.0",
+  "description": "Eval framework for Agention pipelines",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "prebuild": "npm run clean",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "test:watch": "node --import tsx --watch --test 'src/**/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "peerDependencies": {
+    "@agentionai/agents": ">=0.12.0"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@agentionai/agents": "^0.12.0",
+    "@types/node": "^18.15.11",
+    "@typescript-eslint/eslint-plugin": "^5.57.1",
+    "@typescript-eslint/parser": "^5.57.1",
+    "eslint": "^8.57.1",
+    "rimraf": "^4.4.1",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.3"
+  },
+  "keywords": [
+    "agention",
+    "eval",
+    "llm",
+    "ai",
+    "agent",
+    "evaluation"
+  ],
+  "author": "Laurent Zuijdwijk",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/laurentzuijdwijk/agention-eval.git"
+  },
+  "bugs": {
+    "url": "https://github.com/laurentzuijdwijk/agention-eval/issues"
+  }
+}
