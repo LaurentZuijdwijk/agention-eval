@@ -124,7 +124,7 @@ export class Scorer {
         const pass = missing.length === 0;
         return {
           pass,
-          score: (keywords.length - missing.length) / Math.max(keywords.length, 1),
+          score: keywords.length === 0 ? 1 : (keywords.length - missing.length) / keywords.length,
           reason: pass ? undefined : `Missing keywords: ${missing.join(', ')}`,
           scorerName: 'contains',
         };
@@ -160,7 +160,7 @@ export class Scorer {
         const pass = mismatches.length === 0;
         return {
           pass,
-          score: (keys.length - mismatches.length) / Math.max(keys.length, 1),
+          score: keys.length === 0 ? 1 : (keys.length - mismatches.length) / keys.length,
           reason: pass ? undefined : mismatches.join('; '),
           scorerName: 'exactMatch',
         };
@@ -291,7 +291,7 @@ export class Scorer {
         const pass = mismatches.length === 0;
         return {
           pass,
-          score: (fields.length - mismatches.length) / Math.max(fields.length, 1),
+          score: fields.length === 0 ? 1 : (fields.length - mismatches.length) / fields.length,
           reason: pass ? undefined : mismatches.join('; '),
           scorerName: 'fieldAccuracy',
         };
