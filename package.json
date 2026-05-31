@@ -17,7 +17,7 @@
     "build": "tsc",
     "clean": "rimraf dist",
     "prebuild": "npm run clean",
-    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "test": "find src -name '*.test.ts' | xargs node --import tsx --test",
     "test:watch": "node --import tsx --watch --test 'src/**/*.test.ts'",
     "test:examples": "node --import tsx --test examples/09-node-test.ts",
     "typecheck": "tsc --noEmit",
