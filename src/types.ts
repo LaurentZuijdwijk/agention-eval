@@ -75,3 +75,24 @@ export interface EvalFailConditions {
   passRate?: EvalThreshold;
   scores?: Record<string, EvalThreshold>;
 }
+
+// --- Comparative ranking (EvalRunner.rank) ---
+
+export interface RankedTarget {
+  name: string;
+  wins: number;         // number of cases where this target was ranked best
+  points: number;       // Borda points: (N-1) for 1st, down to 0 for last, summed
+  averageRank: number;  // mean 1-based rank across cases (lower is better)
+}
+
+export interface RankCaseResult<TInput = string> {
+  case: EvalCase<TInput>;
+  outputs: Record<string, string>;  // target name → its output for this case
+  ranking: string[];                // target names, best → worst (empty if the judge failed)
+  reason?: string;                  // the judge's explanation
+}
+
+export interface RankReport<TInput = string> {
+  leaderboard: RankedTarget[];      // sorted best → worst
+  cases: RankCaseResult<TInput>[];
+}

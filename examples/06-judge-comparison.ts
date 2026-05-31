@@ -13,6 +13,7 @@
  *   ANTHROPIC_API_KEY=... OPENAI_API_KEY=... MISTRAL_API_KEY=... \
  *   node --import tsx examples/06-judge-comparison.ts
  */
+import 'dotenv/config'; // load ANTHROPIC_API_KEY / OPENAI_API_KEY / MISTRAL_API_KEY from a .env file
 import { ClaudeAgent } from '@agentionai/agents/claude';
 import { OpenAiAgent } from '@agentionai/agents/openai';
 import { MistralAgent } from '@agentionai/agents/mistral';

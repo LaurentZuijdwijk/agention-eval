@@ -5,9 +5,16 @@
  * EvalRunner.compare(). Useful for deciding which model is cost-effective
  * for a given extraction task.
  */
+import "dotenv/config"; // load ANTHROPIC_API_KEY etc. from a .env file
 import { ClaudeAgent } from "@agentionai/agents/claude";
 import { z } from "zod";
-import { EvalDataset, EvalRunner, Scorer, formatReport } from "../src";
+import {
+  EvalDataset,
+  EvalRunner,
+  Scorer,
+  formatReport,
+  formatReportTap,
+} from "../src";
 
 const DESCRIPTION = [
   "Extract the product name and price from the text.",
@@ -61,6 +68,7 @@ EvalRunner.compare(dataset, scorers, {
     for (const [model, report] of Object.entries(reports)) {
       console.log(`\n--- ${model} ---`);
       console.log(formatReport(report));
+      console.log(formatReportTap(report));
     }
   })
   .catch(console.error);

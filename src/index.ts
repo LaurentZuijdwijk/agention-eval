@@ -15,6 +15,9 @@ export type {
   EvalTarget,
   EvalThreshold,
   EvalFailConditions,
+  RankedTarget,
+  RankCaseResult,
+  RankReport,
 } from './types';
 export { EvalThresholdError } from './runner';
 export type { EvalRunnerOptions } from './runner';

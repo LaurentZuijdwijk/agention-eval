@@ -7,6 +7,7 @@
  *   - fieldAccuracy — fuzzy-matches extracted values against ground truth,
  *                     handling currency formatting, whitespace, etc.
  */
+import 'dotenv/config'; // load ANTHROPIC_API_KEY etc. from a .env file
 import { ClaudeAgent } from '@agentionai/agents/claude';
 import { z } from 'zod';
 import { EvalDataset, EvalRunner, Scorer, formatReport } from '../src';

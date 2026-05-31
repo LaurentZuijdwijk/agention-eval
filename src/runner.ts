@@ -1,11 +1,14 @@
 import { MetricsCollector } from '@agentionai/agents';
 import { EvalDataset } from './dataset';
 import {
+  EvalCase,
   EvalCaseResult,
   EvalFailConditions,
   EvalReport,
   EvalTarget,
   IScorer,
+  RankCaseResult,
+  RankReport,
   ToolCall,
 } from './types';
 
@@ -174,6 +177,42 @@ export class EvalRunner<TInput = string> {
     );
     return Object.fromEntries(entries);
   }
+
+  // Comparative ("arena") evaluation: for each case, run every target, then ask
+  // a single judge to rank their outputs against each other. Far more
+  // discriminating than independent pointwise scoring (Scorer.llm), which
+  // saturates — an easy task scores every output 5/5, so absolute scores can't
+  // separate good prompts from great ones. Returns a leaderboard aggregated
+  // across all cases. Requires at least two targets.
+  static async rank<TInput = string>(options: {
+    dataset: EvalDataset<TInput>;
+    targets: Record<string, EvalTarget<TInput>>;
+    judge: EvalTarget;
+    criteria: string;
+    concurrency?: number;
+  }): Promise<RankReport<TInput>> {
+    const { dataset, targets, judge, criteria, concurrency = 1 } = options;
+    const names = Object.keys(targets);
+    if (names.length < 2) {
+      throw new Error('EvalRunner.rank requires at least two targets to compare.');
+    }
+
+    const semaphore = new Semaphore(concurrency);
+    const caseResults: RankCaseResult<TInput>[] = new Array(dataset.size);
+
+    await Promise.all(
+      dataset.cases.map(async (evalCase, index) => {
+        await semaphore.acquire();
+        try {
+          caseResults[index] = await rankCase(evalCase, names, targets, judge, criteria);
+        } finally {
+          semaphore.release();
+        }
+      })
+    );
+
+    return buildRankReport(caseResults, names);
+  }
 }
 
 async function runCase<TInput>(
@@ -309,4 +348,130 @@ function buildReport<TInput>(
     durationMs,
     cases,
   };
+}
+
+// --- Comparative ranking helpers ---
+
+function shuffle<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function parseJudgeJson(raw: string): Record<string, unknown> | undefined {
+  const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+  try {
+    const parsed = JSON.parse(stripped);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function rankCase<TInput>(
+  evalCase: EvalCase<TInput>,
+  names: string[],
+  targets: Record<string, EvalTarget<TInput>>,
+  judge: EvalTarget,
+  criteria: string
+): Promise<RankCaseResult<TInput>> {
+  // Run every target on this case.
+  const outputs: Record<string, string> = {};
+  await Promise.all(
+    names.map(async (name) => {
+      try {
+        const raw = await targets[name].execute(evalCase.input);
+        outputs[name] = typeof raw === 'string' ? raw : raw.toString();
+      } catch (err) {
+        outputs[name] = `<<target errored: ${err instanceof Error ? err.message : String(err)}>>`;
+      }
+    })
+  );
+
+  // Anonymise + shuffle so the judge can't anchor on target names or position.
+  const order = shuffle(names);
+  const labels = order.map((_, i) => String.fromCharCode(65 + i)); // A, B, C, ...
+  const labelToName = new Map(labels.map((l, i) => [l, order[i]]));
+
+  const promptLines = [
+    'You are comparing AI outputs produced for the same task.',
+    'Rank them from best to worst by how well they satisfy the criteria.',
+    '',
+    `Criteria: ${criteria}`,
+    '',
+    `Input: ${JSON.stringify(evalCase.input)}`,
+  ];
+  if (evalCase.expected !== undefined) {
+    promptLines.push(`Reference: ${JSON.stringify(evalCase.expected)}`);
+  }
+  promptLines.push('', 'Candidates:');
+  order.forEach((name, i) => promptLines.push('', `[${labels[i]}]`, outputs[name]));
+  promptLines.push(
+    '',
+    'Respond with JSON only, no other text:',
+    '{"ranking": ["<label>", ...], "reason": "<brief explanation>"}',
+    `The "ranking" array must list every label (${labels.join(', ')}) exactly once, best first.`
+  );
+  const prompt = promptLines.join('\n');
+
+  let raw: string;
+  try {
+    const res = await judge.execute(prompt as never);
+    raw = typeof res === 'string' ? res : res.toString();
+  } catch (err) {
+    return { case: evalCase, outputs, ranking: [], reason: `Judge error: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  const parsed = parseJudgeJson(raw);
+  const rawRanking = parsed?.ranking;
+  const reason = typeof parsed?.reason === 'string' ? (parsed.reason as string) : undefined;
+
+  // Validate: the ranking must be a permutation of the labels.
+  if (
+    !Array.isArray(rawRanking) ||
+    rawRanking.length !== labels.length ||
+    new Set(rawRanking).size !== labels.length ||
+    !rawRanking.every((l) => labelToName.has(l as string))
+  ) {
+    return { case: evalCase, outputs, ranking: [], reason: reason ?? `Could not parse judge ranking: ${raw}` };
+  }
+
+  const ranking = (rawRanking as string[]).map((l) => labelToName.get(l) as string);
+  return { case: evalCase, outputs, ranking, reason };
+}
+
+function buildRankReport<TInput>(
+  cases: RankCaseResult<TInput>[],
+  names: string[]
+): RankReport<TInput> {
+  const stats = new Map(names.map((n) => [n, { wins: 0, points: 0, rankSum: 0, ranked: 0 }]));
+
+  for (const c of cases) {
+    const n = c.ranking.length;
+    c.ranking.forEach((name, pos) => {
+      const s = stats.get(name);
+      if (!s) return;
+      s.points += n - 1 - pos; // Borda count
+      s.rankSum += pos + 1;
+      s.ranked += 1;
+      if (pos === 0) s.wins += 1;
+    });
+  }
+
+  const leaderboard = names
+    .map((name) => {
+      const s = stats.get(name)!;
+      return {
+        name,
+        wins: s.wins,
+        points: s.points,
+        averageRank: s.ranked > 0 ? s.rankSum / s.ranked : NaN,
+      };
+    })
+    .sort((a, b) => b.points - a.points || b.wins - a.wins || a.averageRank - b.averageRank);
+
+  return { leaderboard, cases };
 }

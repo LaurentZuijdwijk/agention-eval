@@ -18,6 +18,7 @@
  * The judge's `reason` is attached to each ScorerResult, making failures
  * self-explanatory in the report.
  */
+import 'dotenv/config'; // load ANTHROPIC_API_KEY etc. from a .env file
 import { ClaudeAgent } from '@agentionai/agents/claude';
 import { EvalDataset, EvalRunner, EvalThresholdError, Scorer, formatReport } from '../src';
 
@@ -75,17 +76,21 @@ const runner = new EvalRunner({
   dataset,
   scorers: [
     // Fast, zero-cost guard that applies to every case regardless of topic:
-    // a 1–2 sentence summary should be non-empty and shorter than its source.
-    // Cheap structural checks like this catch gross failures before spending
-    // judge tokens. (Keyword `contains` checks don't fit here — the dataset
-    // spans multiple topics, so no single keyword set applies to all cases.)
+    // catch gross failures (empty output, or a model that ignored "1–2
+    // sentences" and dumped paragraphs) before spending judge tokens. We cap at
+    // the source length, but with a floor so a faithful summary of an already
+    // short passage isn't punished for being about the same length — strict
+    // "shorter than source" is a bad invariant for short inputs. (Keyword
+    // `contains` checks don't fit — the dataset spans topics, so no single
+    // keyword set applies to all cases.)
     Scorer.custom('lengthGuard', async (output, _expected, input) => {
       const len = output.trim().length;
-      const pass = len > 0 && len < String(input).length;
+      const max = Math.max(String(input).length, 300); // ~a couple of sentences
+      const pass = len > 0 && len <= max;
       return {
         pass,
         score: pass ? 1 : 0,
-        reason: pass ? undefined : `summary length ${len} not within (0, ${String(input).length})`,
+        reason: pass ? undefined : `summary length ${len} exceeds limit ${max}`,
         scorerName: 'lengthGuard',
       };
     }),

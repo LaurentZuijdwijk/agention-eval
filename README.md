@@ -122,28 +122,39 @@ The judge must be shared across all targets and run at `temperature: 0`. A judge
 
 See [`examples/06-judge-comparison.ts`](examples/06-judge-comparison.ts) for the full working example.
 
-## Comparing prompts
+## Comparing prompts — head-to-head ranking
 
-Keep the model fixed and vary the system prompt across targets. This is the fastest way to A/B test prompt variants before shipping.
+Keep the model fixed and vary the system prompt across targets. But **don't** score each variant independently with `Scorer.llm` and rank by mean score — pointwise absolute scoring saturates. On an easy task the judge rates every output 5/5, so all variants tie and you learn nothing about which is best.
+
+`EvalRunner.rank()` fixes this: for each case it runs every target, then asks a single judge to **rank all the outputs against each other**. Relative judgments are far more discriminating than absolute ones (this is how arena-style evals work). Candidate outputs are anonymised and shuffled per case, so the judge can't anchor on a target's name or position.
 
 ```typescript
 const make = (id: string, description: string) =>
   new ClaudeAgent({ id, name: id, description, apiKey, model, temperature: 0.3 });
 
-const reports = await EvalRunner.compare(dataset, scorers, {
-  'minimal':          make('minimal',          'Summarise the text.'),
-  'explicit':         make('explicit',         'Summarise in 1–2 sentences. Do not add information.'),
-  'framed':           make('framed',           'Write a one-sentence abstract. Capture only the facts.'),
-  'chain-of-thought': make('chain-of-thought', 'Identify the 2–3 key facts, then summarise them faithfully.'),
+const report = await EvalRunner.rank({
+  dataset,
+  judge,   // shared, temperature 0
+  criteria: 'Which summary most faithfully and concisely covers the key points, without omissions or additions?',
+  targets: {
+    'minimal':          make('minimal',          'Summarise the text.'),
+    'explicit':         make('explicit',         'Summarise in 1–2 sentences. Do not add information.'),
+    'framed':           make('framed',           'Write a one-sentence abstract. Capture only the facts.'),
+    'chain-of-thought': make('chain-of-thought', 'Identify the 2–3 key facts, then summarise them faithfully.'),
+  },
 });
 
-// Ranked summary
-Object.entries(reports)
-  .sort(([, a], [, b]) => (b.scores['llm'] ?? 0) - (a.scores['llm'] ?? 0))
-  .forEach(([name, r], i) =>
-    console.log(`${i + 1}. ${name.padEnd(20)} score: ${r.scores['llm']?.toFixed(3)}`)
-  );
+report.leaderboard.forEach((t, i) =>
+  console.log(`${i + 1}. ${t.name.padEnd(20)} wins: ${t.wins}  points: ${t.points}  avg rank: ${t.averageRank.toFixed(2)}`)
+);
 ```
+
+`rank()` requires at least two targets and returns a `RankReport`:
+
+- **`leaderboard`** — targets sorted best→worst, each with `wins` (times ranked first), `points` (Borda count: `N−1` for first place down to `0` for last, summed across cases), and `averageRank`.
+- **`cases`** — per-case detail: every target's `outputs`, the judge's `ranking` (best→worst), and its `reason`.
+
+The judge should be shared across targets and run at `temperature: 0`. If the judge returns a malformed or incomplete ranking for a case, that case's `ranking` is empty and it's skipped in the aggregate.
 
 See [`examples/07-compare-prompts.ts`](examples/07-compare-prompts.ts) for the full working example.
 
