@@ -21,7 +21,7 @@
     "test:watch": "node --import tsx --watch --test 'src/**/*.test.ts'",
     "test:examples": "node --import tsx --test examples/09-node-test.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src --ext .ts"
   },
   "peerDependencies": {
     "@agentionai/agents": ">=0.12.0"
