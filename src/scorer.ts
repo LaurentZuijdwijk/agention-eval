@@ -1,5 +1,9 @@
 import { ZodSchema } from 'zod';
-import { IScorer, ScorerResult, EvalTarget } from './types';
+import { IScorer, ScorerContext, ScorerResult, EvalTarget } from './types';
+
+// A tool the target is expected to call: just a name, or a name plus a subset
+// of input arguments to assert (only the listed keys are compared).
+export type ExpectedToolCall = string | { name: string; input?: Record<string, unknown> };
 
 // --- Value normalisation (used by exactMatch and fieldAccuracy) ---
 
@@ -71,6 +75,24 @@ function valuesEqual(
 
   // String comparison (case-insensitive)
   return String(a).toLowerCase() === String(e).toLowerCase();
+}
+
+// Partial deep comparison used to match tool-call arguments. Only keys present
+// in `expected` are checked, so you can assert just the important arguments.
+// Scalars go through valuesEqual, so the usual leniency applies (e.g. "5" === 5,
+// "Paris" === "paris").
+function deepValueEqual(expected: unknown, actual: unknown): boolean {
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+    return expected.every((e, i) => deepValueEqual(e, actual[i]));
+  }
+  if (expected && typeof expected === 'object') {
+    if (!actual || typeof actual !== 'object' || Array.isArray(actual)) return false;
+    return Object.entries(expected as Record<string, unknown>).every(([k, v]) =>
+      deepValueEqual(v, (actual as Record<string, unknown>)[k])
+    );
+  }
+  return valuesEqual(actual, expected);
 }
 
 function tryParseJson(output: string): unknown {
@@ -277,14 +299,86 @@ export class Scorer {
     };
   }
 
+  // Scores the tools the target called during the case (read from its history
+  // by the runner). `expected` is the tools you expect, each as a name or
+  // `{ name, input }` where `input` asserts a subset of the call's arguments.
+  //
+  // Options:
+  //   ordered    — expected calls must appear in this order (as a subsequence).
+  //                Default false: order-independent set match.
+  //   allowExtra — permit tool calls beyond those expected. Default true:
+  //                set false to also fail on unexpected calls.
+  static toolCalls(
+    expected: ExpectedToolCall[],
+    options: { ordered?: boolean; allowExtra?: boolean } = {}
+  ): IScorer {
+    const { ordered = false, allowExtra = true } = options;
+    const wanted = expected.map((e) => (typeof e === 'string' ? { name: e } : e));
+    const describe = (e: { name: string; input?: Record<string, unknown> }) =>
+      e.input ? `${e.name}(${JSON.stringify(e.input)})` : e.name;
+    const matches = (
+      e: { name: string; input?: Record<string, unknown> },
+      a: { name: string; input: Record<string, unknown> }
+    ) => e.name === a.name && (e.input === undefined || deepValueEqual(e.input, a.input));
+
+    return {
+      name: 'toolCalls',
+      async score(_output, _expected, _input, context?: ScorerContext): Promise<ScorerResult> {
+        const actual = context?.toolCalls ?? [];
+        const used = new Set<number>();
+        const missing: string[] = [];
+        let matched = 0;
+        let cursor = 0; // for ordered subsequence matching
+
+        for (const want of wanted) {
+          let found = -1;
+          for (let i = ordered ? cursor : 0; i < actual.length; i++) {
+            if (!used.has(i) && matches(want, actual[i])) {
+              found = i;
+              break;
+            }
+          }
+          if (found >= 0) {
+            matched++;
+            used.add(found);
+            if (ordered) cursor = found + 1;
+          } else {
+            missing.push(describe(want));
+          }
+        }
+
+        const extra = allowExtra
+          ? []
+          : actual.filter((_, i) => !used.has(i)).map((c) => c.name);
+
+        const reasons: string[] = [];
+        if (missing.length) reasons.push(`missing: ${missing.join(', ')}`);
+        if (extra.length) reasons.push(`unexpected: ${extra.join(', ')}`);
+
+        const pass = missing.length === 0 && extra.length === 0;
+        return {
+          pass,
+          score: wanted.length > 0 ? matched / wanted.length : extra.length === 0 ? 1 : 0,
+          reason: pass ? undefined : reasons.join('; ') || 'tool calls did not match',
+          scorerName: 'toolCalls',
+        };
+      },
+    };
+  }
+
   static custom(
     name: string,
-    fn: (output: string, expected: unknown, input: unknown) => Promise<ScorerResult>
+    fn: (
+      output: string,
+      expected: unknown,
+      input: unknown,
+      context?: ScorerContext
+    ) => Promise<ScorerResult>
   ): IScorer {
     return {
       name,
-      async score(output, expected, input): Promise<ScorerResult> {
-        const result = await fn(output, expected, input);
+      async score(output, expected, input, context): Promise<ScorerResult> {
+        const result = await fn(output, expected, input, context);
         return { ...result, scorerName: name };
       },
     };

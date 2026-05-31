@@ -1,0 +1,6 @@
+examples/
+lib
+*.md
+*.html
+examples/package-lock.json
+.npmrc

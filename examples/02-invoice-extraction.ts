@@ -7,7 +7,7 @@
  *   - fieldAccuracy — fuzzy-matches extracted values against ground truth,
  *                     handling currency formatting, whitespace, etc.
  */
-import { ClaudeAgent } from '@agentionai/agents';
+import { ClaudeAgent } from '@agentionai/agents/claude';
 import { z } from 'zod';
 import { EvalDataset, EvalRunner, Scorer, formatReport } from '../src';
 
@@ -33,14 +33,17 @@ const invoiceSchema = z.object({
 
 const dataset = new EvalDataset([
   {
+    name: 'USD invoice with thousands separator',
     input: 'INVOICE\nFrom: Acme Corp\nInvoice #: INV-001\nDate: January 15, 2024\nTotal Due: $1,250.00',
     expected: { invoice_no: 'INV-001', date: '2024-01-15', vendor: 'Acme Corp', total: 1250 },
   },
   {
+    name: 'GBP invoice with ISO date',
     input: 'INVOICE\nFrom: Globex Ltd\nInvoice #: INV-002\nDate: 2024-02-01\nAmount: £890.50',
     expected: { invoice_no: 'INV-002', date: '2024-02-01', vendor: 'Globex Ltd', total: 890.50 },
   },
   {
+    name: 'EUR invoice, "Ref" label and prose date',
     input: 'INVOICE\nFrom: Initech\nRef: INV-003\nIssued: March 3 2024\nTotal: €2,400.00',
     expected: { invoice_no: 'INV-003', date: '2024-03-03', vendor: 'Initech', total: 2400 },
   },

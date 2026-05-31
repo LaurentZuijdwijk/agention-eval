@@ -19,6 +19,7 @@
     "prebuild": "npm run clean",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
     "test:watch": "node --import tsx --watch --test 'src/**/*.test.ts'",
+    "test:examples": "node --import tsx --test examples/09-node-test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src"
   },
@@ -26,6 +27,7 @@
     "@agentionai/agents": ">=0.12.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "zod": "^3.23.0"
   },
   "devDependencies": {

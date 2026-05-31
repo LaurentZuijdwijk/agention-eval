@@ -18,7 +18,7 @@
  * The judge's `reason` is attached to each ScorerResult, making failures
  * self-explanatory in the report.
  */
-import { ClaudeAgent } from '@agentionai/agents';
+import { ClaudeAgent } from '@agentionai/agents/claude';
 import { EvalDataset, EvalRunner, EvalThresholdError, Scorer, formatReport } from '../src';
 
 const summariser = new ClaudeAgent({

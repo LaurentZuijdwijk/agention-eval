@@ -13,7 +13,9 @@
  *   ANTHROPIC_API_KEY=... OPENAI_API_KEY=... MISTRAL_API_KEY=... \
  *   node --import tsx examples/06-judge-comparison.ts
  */
-import { ClaudeAgent, OpenAiAgent, MistralAgent } from '@agentionai/agents';
+import { ClaudeAgent } from '@agentionai/agents/claude';
+import { OpenAiAgent } from '@agentionai/agents/openai';
+import { MistralAgent } from '@agentionai/agents/mistral';
 import { EvalDataset, EvalRunner, Scorer, formatReport } from '../src';
 
 const DESCRIPTION = [

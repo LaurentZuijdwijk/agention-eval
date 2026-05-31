@@ -1,6 +1,13 @@
 import { MetricsCollector } from '@agentionai/agents';
 import { EvalDataset } from './dataset';
-import { EvalCaseResult, EvalFailConditions, EvalReport, EvalTarget, IScorer } from './types';
+import {
+  EvalCaseResult,
+  EvalFailConditions,
+  EvalReport,
+  EvalTarget,
+  IScorer,
+  ToolCall,
+} from './types';
 
 export class EvalThresholdError<TInput = string> extends Error {
   readonly report: EvalReport<TInput>;
@@ -57,6 +64,42 @@ function tokenSnapshot(metrics: MetricsCollector) {
     output: agg.totalTokens.outputTokens,
     total: agg.totalTokens.totalTokens,
   };
+}
+
+// Agention agents record tool calls as `tool_use` content blocks in their
+// history. Read them duck-typed after execute() so any target exposing
+// getHistoryEntries() yields its tool-call trace, without coupling to the
+// peer dep's types. With transient history (the default) the entries hold just
+// the current turn; with shared history, prefer concurrency: 1 for clean
+// per-case attribution.
+function readToolCalls(target: unknown): ToolCall[] {
+  const getEntries = (target as { getHistoryEntries?: () => unknown }).getHistoryEntries;
+  if (typeof getEntries !== 'function') return [];
+
+  let entries: unknown;
+  try {
+    entries = getEntries.call(target);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(entries)) return [];
+
+  const calls: ToolCall[] = [];
+  for (const entry of entries) {
+    const content = (entry as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      const b = block as { type?: string; id?: string; name?: string; input?: unknown };
+      if (b?.type === 'tool_use' && typeof b.name === 'string') {
+        calls.push({
+          name: b.name,
+          input: (b.input as Record<string, unknown>) ?? {},
+          id: b.id,
+        });
+      }
+    }
+  }
+  return calls;
 }
 
 // Agention agents expose per-call token usage directly on the instance after
@@ -162,11 +205,15 @@ async function runCase<TInput>(
       pass: false,
       durationMs: Date.now() - start,
       tokens: undefined,
+      toolCalls: [],
     };
   }
 
+  const toolCalls = readToolCalls(target);
+  const context = { toolCalls };
+
   const scores = await Promise.all(
-    scorers.map((s) => s.score(output, evalCase.expected, evalCase.input).catch((err) => ({
+    scorers.map((s) => s.score(output, evalCase.expected, evalCase.input, context).catch((err) => ({
       pass: false,
       score: 0,
       reason: `Scorer error: ${err instanceof Error ? err.message : String(err)}`,
@@ -195,6 +242,7 @@ async function runCase<TInput>(
     pass: scores.every((s) => s.pass),
     durationMs: Date.now() - start,
     tokens,
+    toolCalls,
   };
 }
 

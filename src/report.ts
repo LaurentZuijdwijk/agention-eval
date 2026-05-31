@@ -58,9 +58,13 @@ export function formatReport<TInput = string>(
     lines.push(`Failed Cases (${failedCases.length}):`);
     for (const c of failedCases) {
       const inputPreview = JSON.stringify(c.case.input).slice(0, 80);
+      if (c.case.name) lines.push(`  ✗ ${c.case.name}`);
       lines.push(`  input: ${inputPreview}`);
       if (c.case.metadata && Object.keys(c.case.metadata).length > 0) {
         lines.push(`  metadata: ${JSON.stringify(c.case.metadata)}`);
+      }
+      if (c.toolCalls && c.toolCalls.length > 0) {
+        lines.push(`  tools: ${c.toolCalls.map((t) => `${t.name}(${JSON.stringify(t.input)})`).join(' → ')}`);
       }
       for (const s of c.scores.filter((s) => !s.pass)) {
         lines.push(`    [FAIL] ${s.scorerName}: ${s.reason ?? 'no reason'}`);
@@ -86,19 +90,23 @@ export function formatReportTap<TInput = string>(report: EvalReport<TInput>): st
   report.cases.forEach((c, i) => {
     const n = i + 1;
     const inputPreview = JSON.stringify(c.case.input).slice(0, 60);
+    const description = c.case.name ?? inputPreview;
     const firstFail = c.scores.find((s) => !s.pass);
     const hasMeta = c.case.metadata && Object.keys(c.case.metadata).length > 0;
 
     if (c.pass) {
-      lines.push(`ok ${n} - ${inputPreview}`);
+      lines.push(`ok ${n} - ${description}`);
       if (hasMeta) {
         lines.push('  ---');
         lines.push(`  metadata: ${JSON.stringify(c.case.metadata)}`);
         lines.push('  ...');
       }
     } else {
-      lines.push(`not ok ${n} - ${inputPreview}${firstFail ? ` # ${firstFail.scorerName}` : ''}`);
+      lines.push(`not ok ${n} - ${description}${firstFail ? ` # ${firstFail.scorerName}` : ''}`);
       lines.push('  ---');
+      // Include the input as a diagnostic — when `name` is the description, the
+      // input is no longer on the test line, so surface it here for debugging.
+      lines.push(`  input: ${inputPreview}`);
       lines.push(`  duration_ms: ${c.durationMs}`);
       if (c.tokens) {
         lines.push(`  tokens: ${c.tokens.total}`);

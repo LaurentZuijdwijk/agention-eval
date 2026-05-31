@@ -15,7 +15,7 @@
  *   4. Lock that prompt into a single-target EvalRunner with failIf to gate CI
  *      (EvalRunner.compare itself never gates — it always returns every report)
  */
-import { ClaudeAgent } from '@agentionai/agents';
+import { ClaudeAgent } from '@agentionai/agents/claude';
 import { EvalDataset, EvalRunner, Scorer, formatReport } from '../src';
 
 const API_KEY = process.env.ANTHROPIC_API_KEY!;

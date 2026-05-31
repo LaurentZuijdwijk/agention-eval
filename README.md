@@ -15,7 +15,7 @@ npm install @agentionai/eval @agentionai/agents
 Any Agention `Pipeline`, `AgentGraph`, `GraphNode`, or plain object with an `execute` method is a valid eval target.
 
 ```typescript
-import { ClaudeAgent } from '@agentionai/agents';
+import { ClaudeAgent } from '@agentionai/agents/claude';
 import { EvalDataset, EvalRunner, EvalThresholdError, Scorer, formatReport } from '@agentionai/eval';
 
 const agent = new ClaudeAgent({
@@ -59,7 +59,7 @@ Deterministic scorers can verify structure and field values, but they can't tell
 `Scorer.llm()` sends the full context — `input`, `output`, `expected`, `criteria` — to a judge agent and asks it to return `{ score, reason }` JSON. The score is normalised to 0–1 and the `reason` surfaces in every report format, making failures self-explanatory.
 
 ```typescript
-import { ClaudeAgent } from '@agentionai/agents';
+import { ClaudeAgent } from '@agentionai/agents/claude';
 import { Scorer } from '@agentionai/eval';
 
 // Use a cheap model for the judge — it rarely needs deep reasoning.
@@ -98,7 +98,9 @@ See [`examples/05-judge-agent.ts`](examples/05-judge-agent.ts) for a full summar
 `EvalRunner.compare` runs the same dataset and scorers against multiple targets and returns one report per target — each with its own per-case token counts in `report.tokenCost`, so you can find the cheapest model that meets your quality bar, or catch quality regressions when upgrading. It always returns every report (it deliberately takes no `failIf` — aborting mid-comparison would throw away the other targets' results); gate on thresholds per-target after it returns.
 
 ```typescript
-import { ClaudeAgent, OpenAiAgent, MistralAgent } from '@agentionai/agents';
+import { ClaudeAgent } from '@agentionai/agents/claude';
+import { OpenAiAgent } from '@agentionai/agents/openai';
+import { MistralAgent } from '@agentionai/agents/mistral';
 
 const reports = await EvalRunner.compare(dataset, [
   Scorer.fieldAccuracy(['invoice_no', 'total'], { tolerance: 0.01 }),
@@ -150,7 +152,7 @@ See [`examples/07-compare-prompts.ts`](examples/07-compare-prompts.ts) for the f
 `Scorer.fieldAccuracy` handles the messy reality of LLM extraction output — currency symbols, number formatting, boolean strings — so you don't have to normalise before comparing.
 
 ```typescript
-import { ClaudeAgent } from '@agentionai/agents';
+import { ClaudeAgent } from '@agentionai/agents/claude';
 import { z } from 'zod';
 
 const extractor = new ClaudeAgent({
@@ -220,6 +222,57 @@ failIf: {
 
 Supported operators: `lt` (less than), `lte` (less than or equal).
 
+## Use with `node:test` (or any test runner)
+
+You don't need to reinvent `describe`/`it` — evals compose *into* the test runner you already use. Run the dataset once, then surface each case as a native subtest. You get familiar BDD output, `--test-reporter` formats, watch mode, and CI integration for free, with the scorers doing the judging. The case [`name`](#dataset) becomes the test description.
+
+```typescript
+import { describe, it } from 'node:test';
+import assert from 'node:assert';
+import { EvalDataset, EvalRunner, Scorer } from '@agentionai/eval';
+
+const dataset = new EvalDataset([
+  { name: 'uppercases a single word', input: 'hello', expected: { value: 'HELLO' } },
+  // ...
+]);
+
+// Run once; every subtest awaits the same promise, so the eval never re-runs.
+const reportPromise = new EvalRunner({ target, dataset, scorers }).run();
+
+describe('uppercase extractor', () => {
+  dataset.cases.forEach((evalCase, i) => {
+    it(evalCase.name ?? JSON.stringify(evalCase.input), async () => {
+      const result = (await reportPromise).cases[i];
+      const reasons = result.scores.filter((s) => !s.pass).map((s) => `${s.scorerName}: ${s.reason}`);
+      assert.ok(result.pass, reasons.join('\n'));
+    });
+  });
+});
+
+// Suite-level quality gates — the node:test equivalent of `failIf`.
+describe('quality gates', () => {
+  it('passes at least 90% of cases', async () => {
+    const { passRate } = await reportPromise;
+    assert.ok(passRate >= 0.9, `pass rate ${(passRate * 100).toFixed(1)}%`);
+  });
+});
+```
+
+```bash
+node --import tsx --test examples/09-node-test.ts                      # run
+node --import tsx --test --test-reporter=spec examples/09-node-test.ts # pretty
+node --import tsx --test --watch examples/09-node-test.ts              # watch
+```
+
+```
+▶ uppercase extractor
+  ✔ uppercases a single word (1.5ms)
+  ✔ trims surrounding whitespace (0.3ms)
+  ✔ computes the correct length (0.3ms)
+```
+
+A failing case surfaces the scorer's `reason` in the runner's assertion error (`exact: expected A9, got A1`). See [`examples/09-node-test.ts`](examples/09-node-test.ts) for the full working example (no API key required).
+
 ## Scorers
 
 ### `Scorer.llm(judgeAgent, options)`
@@ -281,9 +334,35 @@ Scorer.contains(['invoice', 'total'])
 Scorer.contains(['INV-001'], { caseSensitive: true })
 ```
 
+### `Scorer.toolCalls(expected, options?)`
+
+Scores the tools the target actually called during the case — which a string scorer can't see. The runner reads each case's tool-call trace from the target's history (any object exposing `getHistoryEntries()`, which every Agention agent does) and hands it to this scorer.
+
+`expected` is the tools you expect, each as a name or `{ name, input }`. When `input` is given, only the listed keys are compared (a partial match), so you can assert just the arguments that matter.
+
+```typescript
+// Order-independent: these tools were called, with these key arguments
+Scorer.toolCalls([
+  { name: 'search_flights', input: { from: 'SFO', to: 'JFK' } },
+  'book_flight',
+])
+
+// Strict: exactly these tools, in this order, and nothing else
+Scorer.toolCalls(['get_weather', 'send_email'], { ordered: true, allowExtra: false })
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| `ordered` | `false` | Expected calls must appear in this order (as a subsequence) |
+| `allowExtra` | `true` | Permit tool calls beyond those expected; set `false` to fail on unexpected calls |
+
+The trace is also attached to each `EvalCaseResult.toolCalls` and passed to `Scorer.custom` via its fourth `context` argument. Keep `concurrency: 1` when the target shares history across cases, so calls stay attributed to the right case.
+
+See [`examples/08-tool-calls.ts`](examples/08-tool-calls.ts) for a runnable example (no API key required).
+
 ### `Scorer.custom(name, fn)`
 
-Escape hatch for any logic not covered above.
+Escape hatch for any logic not covered above. The fourth `context` argument exposes the tool-call trace (`context.toolCalls`).
 
 ```typescript
 Scorer.custom('wordCount', async (output, expected) => {
@@ -291,13 +370,22 @@ Scorer.custom('wordCount', async (output, expected) => {
   const pass = count <= (expected as number);
   return { pass, score: pass ? 1 : 0, scorerName: 'wordCount' };
 })
+
+// Inspect the tool-call trace
+Scorer.custom('noWrites', async (_output, _expected, _input, context) => {
+  const wrote = context?.toolCalls.some((c) => c.name.startsWith('write_')) ?? false;
+  return { pass: !wrote, score: wrote ? 0 : 1, scorerName: 'noWrites' };
+})
 ```
 
 ## Dataset
 
+Give each case a `name` describing what it verifies — it becomes the test description in every report (TAP `ok N - <name>` and the human-readable failed-case header), falling back to a preview of the input when omitted.
+
 ```typescript
 // From an array
 const dataset = new EvalDataset([
+  { name: 'handles thousands separator', input: 'Total: $1,250.00', expected: { total: 1250 } },
   { input: 'text', expected: { field: 'value' }, metadata: { source: 'doc-1' } },
 ]);
 
@@ -388,6 +476,7 @@ interface EvalCase<TInput = string> {
   input: TInput;
   expected?: unknown;
   metadata?: Record<string, unknown>;
+  name?: string;           // test description; falls back to an input preview
 }
 
 interface EvalCaseResult<TInput = string> {
@@ -397,6 +486,13 @@ interface EvalCaseResult<TInput = string> {
   pass: boolean;           // true if every scorer passed
   durationMs: number;
   tokens?: { input: number; output: number; total: number };
+  toolCalls?: ToolCall[];  // tools the target called during the case
+}
+
+interface ToolCall {
+  name: string;
+  input: Record<string, unknown>;
+  id?: string;             // provider tool-call id, when available
 }
 
 interface EvalReport<TInput = string> {

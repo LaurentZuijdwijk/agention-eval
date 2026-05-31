@@ -31,10 +31,10 @@ const pipeline = {
 };
 
 const dataset = new EvalDataset([
-  { input: 'hello',       expected: { value: 'HELLO',  length: 5 } },
-  { input: 'world',       expected: { value: 'WORLD',  length: 5 } },
-  { input: '  foo bar  ', expected: { value: 'FOO BAR', length: 7 } },
-  { input: 'baz',         expected: { value: 'BAZ',    length: 3 } },
+  { name: 'uppercases a single word',          input: 'hello',       expected: { value: 'HELLO',  length: 5 } },
+  { name: 'reports the correct length',        input: 'world',       expected: { value: 'WORLD',  length: 5 } },
+  { name: 'trims surrounding whitespace',      input: '  foo bar  ', expected: { value: 'FOO BAR', length: 7 } },
+  { name: 'handles a three-letter word',       input: 'baz',         expected: { value: 'BAZ',    length: 3 } },
 ]);
 
 const scorers = [
@@ -73,7 +73,7 @@ function specReporter(r: EvalReport) {
   console.log();
   for (const [i, c] of r.cases.entries()) {
     const icon    = c.pass ? tick : cross;
-    const preview = JSON.stringify(c.case.input).slice(0, 50);
+    const preview = c.case.name ?? JSON.stringify(c.case.input).slice(0, 50);
     console.log(`  ${icon}  ${i + 1}) ${preview}`);
     if (!c.pass) {
       for (const s of c.scores.filter((s) => !s.pass)) {
