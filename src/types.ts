@@ -37,6 +37,7 @@ export interface EvalCaseResult<TInput = string> {
   pass: boolean;
   durationMs: number;
   tokens?: { input: number; output: number; total: number };
+  tokensPerSecond?: number;
   toolCalls?: ToolCall[];
 }
 
@@ -46,7 +47,7 @@ export interface EvalReport<TInput = string> {
   total: number;
   passRate: number;
   scores: Record<string, number>;
-  tokenCost: { total: number; perCase: number };
+  tokenCost: { total: number; perCase: number; perSecond: number };
   durationMs: number;
   cases: EvalCaseResult<TInput>[];
 }

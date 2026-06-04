@@ -273,14 +273,18 @@ async function runCase<TInput>(
   // Prefer the agent's own per-call usage (works without a collector); fall back
   // to the collector delta for composite graph targets that report through it.
   const tokens = readAgentTokenUsage(target) ?? metricsDelta;
+  const durationMs = Date.now() - start;
+  const tokensPerSecond =
+    tokens && durationMs > 0 ? tokens.total / (durationMs / 1000) : undefined;
 
   return {
     case: evalCase,
     output,
     scores,
     pass: scores.every((s) => s.pass),
-    durationMs: Date.now() - start,
+    durationMs,
     tokens,
+    tokensPerSecond,
     toolCalls,
   };
 }
@@ -320,6 +324,11 @@ function buildReport<TInput>(
 ): EvalReport<TInput> {
   const passed = cases.filter((c) => c.pass).length;
   const totalTokens = cases.reduce((sum, c) => sum + (c.tokens?.total ?? 0), 0);
+  const tpsValues = cases
+    .map((c) => c.tokensPerSecond)
+    .filter((v): v is number => v !== undefined);
+  const meanTps =
+    tpsValues.length > 0 ? tpsValues.reduce((a, b) => a + b, 0) / tpsValues.length : 0;
 
   // Collect mean score per scorer
   const scorerAccum: Record<string, { sum: number; count: number }> = {};
@@ -344,6 +353,7 @@ function buildReport<TInput>(
     tokenCost: {
       total: totalTokens,
       perCase: cases.length > 0 ? totalTokens / cases.length : 0,
+      perSecond: meanTps,
     },
     durationMs,
     cases,

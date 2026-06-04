@@ -19,10 +19,13 @@ export function formatReport<TInput = string>(
   lines.push(`Duration: ${report.durationMs.toLocaleString()}ms`);
 
   if (report.tokenCost.total > 0) {
-    lines.push(
+    let tokenLine =
       `Tokens:   ${report.tokenCost.total.toLocaleString()} total` +
-      ` (${report.tokenCost.perCase.toFixed(1)} / case)`
-    );
+      ` (${report.tokenCost.perCase.toFixed(1)} / case)`;
+    if (report.tokenCost.perSecond > 0) {
+      tokenLine += ` · ${report.tokenCost.perSecond.toFixed(1)} tok/s`;
+    }
+    lines.push(tokenLine);
   }
 
   if (Object.keys(report.scores).length > 0) {
@@ -109,7 +112,11 @@ export function formatReportTap<TInput = string>(report: EvalReport<TInput>): st
       lines.push(`  input: ${inputPreview}`);
       lines.push(`  duration_ms: ${c.durationMs}`);
       if (c.tokens) {
-        lines.push(`  tokens: ${c.tokens.total}`);
+        let tokensLine = `  tokens: ${c.tokens.total}`;
+        if (c.tokensPerSecond !== undefined) {
+          tokensLine += ` (${c.tokensPerSecond.toFixed(1)} tok/s)`;
+        }
+        lines.push(tokensLine);
       }
       if (hasMeta) {
         lines.push(`  metadata: ${JSON.stringify(c.case.metadata)}`);
