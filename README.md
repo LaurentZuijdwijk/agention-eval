@@ -447,7 +447,7 @@ console.log(formatReport(report, { groupBy: 'document_type' }));
 Passed:   8 / 10 (80.0%)
 Failed:   2
 Duration: 3,241ms
-Tokens:   12,450 total (1245.0 / case)
+Tokens:   12,450 total (1245.0 / case) · 38.2 tok/s
 
 Scorer Results:
   jsonSchema           [████████████████████]  1.000
@@ -497,6 +497,7 @@ interface EvalCaseResult<TInput = string> {
   pass: boolean;           // true if every scorer passed
   durationMs: number;
   tokens?: { input: number; output: number; total: number };
+  tokensPerSecond?: number; // tokens.total / (durationMs / 1000); present when token data is available
   toolCalls?: ToolCall[];  // tools the target called during the case
 }
 
@@ -512,7 +513,7 @@ interface EvalReport<TInput = string> {
   total: number;
   passRate: number;
   scores: Record<string, number>;  // scorer name → mean score across all cases
-  tokenCost: { total: number; perCase: number };
+  tokenCost: { total: number; perCase: number; perSecond: number }; // perSecond is mean tok/s across cases
   durationMs: number;
   cases: EvalCaseResult<TInput>[];
 }
