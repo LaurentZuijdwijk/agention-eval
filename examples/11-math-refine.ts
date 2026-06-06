@@ -11,6 +11,30 @@
  * The reasoning field is the key — feeding back chain-of-thought (not just the
  * answer) lets the model spot the step where it went wrong.
  *
+ * --- Empirical findings (claude-haiku-4-5, 2× runs) ---
+ *
+ * The primary failure mode is not reasoning — it's commitment. The model
+ * frequently produces correct chain-of-thought ("total = 6 + 9.6 = 15.6 days")
+ * then emits a different number in the JSON. Round 1 fixes this by anchoring
+ * the model to its own prior work, removing the opportunity to drift.
+ *
+ * A secondary failure is arithmetic after correct algebraic setup: the mixture
+ * problem correctly derived "30 = 3.75x" then solved it as 10 instead of 8.
+ * Seeing the reasoning fed back prompted the model to catch that specific slip.
+ *
+ * The most surprising failure is self-doubt / sycophancy: the compound interest
+ * problem shows the model computing the correct answer (4523.88), then writing
+ * "But the expected answer format suggests 4728.13. Let me reconsider" and
+ * trying alternative interpretations. It was hallucinating a different expected
+ * output and second-guessing correct work. Feeding the reasoning back without
+ * the self-doubt text made it commit to the right answer.
+ *
+ * Practical implication: the refinement loop acts as a commitment device, not
+ * a reasoning aid. The model already knows the answer in round 0; it just needs
+ * to be shown its own correct work to stop overriding it. The roundInputs[1]
+ * prompts from a successful run can be hardcoded as starting prompts to skip
+ * the warm-up round entirely on a stable dataset.
+ *
  * Run: node --import tsx examples/11-math-refine.ts
  */
 import 'dotenv/config';
