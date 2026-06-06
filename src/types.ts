@@ -97,3 +97,11 @@ export interface RankReport<TInput = string> {
   leaderboard: RankedTarget[];      // sorted best → worst
   cases: RankCaseResult<TInput>[];
 }
+
+// --- Refinement loop (EvalRunner.refine) ---
+
+export interface RefineReport<TInput = string> {
+  rounds: EvalReport<TInput>[];  // one per round, index 0 = first round
+  final: EvalReport<TInput>;     // same as rounds[rounds.length - 1]
+  improvement: number;           // passRate delta: final.passRate - rounds[0].passRate; 0 when only one round ran
+}

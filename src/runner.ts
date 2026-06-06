@@ -9,6 +9,8 @@ import {
   IScorer,
   RankCaseResult,
   RankReport,
+  RefineReport,
+  ScorerContext,
   ToolCall,
 } from './types';
 
@@ -212,6 +214,137 @@ export class EvalRunner<TInput = string> {
     );
 
     return buildRankReport(caseResults, names);
+  }
+
+  // For each case, generates beamWidth candidate outputs per round, selects the
+  // best-scoring one, then optionally transforms the input (via buildInput) so
+  // the next round can build on the previous best. Returns per-round reports and
+  // an improvement delta so you can see whether iteration actually helped.
+  static async refine<TInput = string>(options: {
+    dataset: EvalDataset<TInput>;
+    // Single target used for all beam slots, or an array that cycles across
+    // slots (e.g. three agents with temperatures 0.3 / 0.7 / 1.0).
+    target: EvalTarget<TInput> | EvalTarget<TInput>[];
+    scorers: IScorer<TInput>[];
+    rounds: number;
+    beamWidth: number;
+    // Receives the current-round input + all beamWidth candidates sorted best-first.
+    // Return the input to use for the next round. Omit for pure best-of-N sampling.
+    buildInput?: (current: TInput, candidatesByScore: string[]) => TInput;
+    // Optionally rephrase the input differently for each beam slot (0-indexed).
+    // Applied after buildInput, so it operates on the current round's input.
+    buildBeamInput?: (input: TInput, beamIndex: number, round: number) => TInput;
+    // Gates concurrent cases. Beam candidates within a single case always run in
+    // parallel — effective simultaneous requests = concurrency × beamWidth.
+    concurrency?: number;
+    onRoundComplete?: (round: number, report: EvalReport<TInput>) => void;
+  }): Promise<RefineReport<TInput>> {
+    const { dataset, scorers, rounds, beamWidth, buildInput, buildBeamInput, concurrency = 1, onRoundComplete } = options;
+
+    if (rounds < 1) throw new Error('EvalRunner.refine requires rounds >= 1');
+    if (beamWidth < 1) throw new Error('EvalRunner.refine requires beamWidth >= 1');
+
+    // Normalize to array so all slots use the same cycling logic.
+    const targetArray = Array.isArray(options.target) ? options.target : [options.target];
+    const semaphore = new Semaphore(concurrency);
+    const currentInputs = dataset.cases.map((c) => c.input);
+    const roundReports: EvalReport<TInput>[] = [];
+
+    for (let round = 0; round < rounds; round++) {
+      const roundResults: EvalCaseResult<TInput>[] = new Array(dataset.size);
+      const roundStart = Date.now();
+
+      await Promise.all(
+        dataset.cases.map(async (evalCase, index) => {
+          await semaphore.acquire();
+          try {
+            const input = currentInputs[index];
+            const caseStart = Date.now();
+
+            // Generate beamWidth candidates in parallel, each with its own
+            // target slot (cycling if fewer targets than beamWidth) and its
+            // own optionally-rephrased input.
+            const beamOutputs = await Promise.all(
+              Array.from({ length: beamWidth }, async (_, i) => {
+                const beamTarget = targetArray[i % targetArray.length];
+                const beamInput = buildBeamInput ? buildBeamInput(input, i, round) : input;
+                try {
+                  const raw = await beamTarget.execute(beamInput);
+                  const output = typeof raw === 'string' ? raw : raw.toString();
+                  return {
+                    output,
+                    toolCalls: readToolCalls(beamTarget),
+                    tokens: readAgentTokenUsage(beamTarget),
+                  };
+                } catch (err) {
+                  return {
+                    output: `<<error: ${err instanceof Error ? err.message : String(err)}>>`,
+                    toolCalls: [] as ToolCall[],
+                    tokens: undefined,
+                  };
+                }
+              }),
+            );
+
+            // Score each candidate, passing its tool-call trace as context
+            const scored = await Promise.all(
+              beamOutputs.map(async (beam) => {
+                const context: ScorerContext = { toolCalls: beam.toolCalls };
+                const scores = await Promise.all(
+                  scorers.map((s) =>
+                    s.score(beam.output, evalCase.expected, input, context).catch((err) => ({
+                      pass: false,
+                      score: 0,
+                      reason: `Scorer error: ${err instanceof Error ? err.message : String(err)}`,
+                      scorerName: s.name,
+                    })),
+                  ),
+                );
+                const meanScore =
+                  scores.length > 0
+                    ? scores.reduce((a, s) => a + s.score, 0) / scores.length
+                    : 0;
+                return { ...beam, scores, meanScore };
+              }),
+            );
+
+            // Sort best-first so buildInput always gets candidates[0] = best
+            scored.sort((a, b) => b.meanScore - a.meanScore);
+            const best = scored[0];
+
+            roundResults[index] = {
+              case: evalCase,
+              output: best.output,
+              scores: best.scores,
+              pass: best.scores.every((s) => s.pass),
+              durationMs: Date.now() - caseStart,
+              tokens: best.tokens,
+              toolCalls: best.toolCalls,
+            };
+
+            if (buildInput) {
+              // Pass the current-round evolved input (not the original dataset input)
+              // so multi-round chains can layer refinements across rounds.
+              currentInputs[index] = buildInput(
+                input,
+                scored.map((c) => c.output),
+              );
+            }
+          } finally {
+            semaphore.release();
+          }
+        }),
+      );
+
+      const report = buildReport(roundResults, Date.now() - roundStart);
+      roundReports.push(report);
+      onRoundComplete?.(round, report);
+    }
+
+    const final = roundReports[roundReports.length - 1];
+    const improvement =
+      roundReports.length > 1 ? final.passRate - roundReports[0].passRate : 0;
+    return { rounds: roundReports, final, improvement };
   }
 }
 

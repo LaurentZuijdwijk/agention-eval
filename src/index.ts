@@ -18,6 +18,7 @@ export type {
   RankedTarget,
   RankCaseResult,
   RankReport,
+  RefineReport,
 } from './types';
 export { EvalThresholdError } from './runner';
 export type { EvalRunnerOptions } from './runner';

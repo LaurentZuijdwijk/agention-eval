@@ -158,6 +158,69 @@ The judge should be shared across targets and run at `temperature: 0`. If the ju
 
 See [`examples/07-compare-prompts.ts`](examples/07-compare-prompts.ts) for the full working example.
 
+## Refinement loop (best-of-N + iterative)
+
+`EvalRunner.refine()` runs the same dataset for multiple **rounds**. Each round generates `beamWidth` candidate outputs, scores all of them, and keeps the best-scoring one. An optional `buildInput` hook feeds the previous round's best output back into the next round's prompt — turning a one-shot best-of-N run into a genuine iterative refinement loop.
+
+```typescript
+const report = await EvalRunner.refine({
+  dataset,
+  target: extractor,
+  scorers: [Scorer.fieldAccuracy(['total', 'vendor'], { tolerance: 0.01 })],
+  rounds: 2,
+  beamWidth: 3,
+  // `current` is the current-round input (reflects prior-round buildInput
+  // transformations, not always the original dataset input).
+  buildInput: (current, [best]) =>
+    `${current}\n\nPrevious attempt:\n${best}\nFill in any missing fields.`,
+  onRoundComplete(round, roundReport) {
+    console.log(`Round ${round + 1}: ${roundReport.passed}/${roundReport.total} passed`);
+  },
+});
+
+console.log(formatReport(report.final));
+console.log(`Improvement: +${(report.improvement * 100).toFixed(0)}pp`);
+```
+
+**Multiple temperature targets.** Pass an array to `target` and each beam slot cycles through it, giving you genuine variation rather than repeated samples from the same distribution:
+
+```typescript
+const targets = [
+  new ClaudeAgent({ ...base, id: 'precise',  temperature: 0.2 }),
+  new ClaudeAgent({ ...base, id: 'balanced', temperature: 0.7 }),
+  new ClaudeAgent({ ...base, id: 'creative', temperature: 1.0 }),
+];
+
+await EvalRunner.refine({ dataset, target: targets, beamWidth: 3, rounds: 2, scorers });
+```
+
+**Per-slot prompt variation.** `buildBeamInput` rephrases the input differently for each beam slot. It runs _after_ `buildInput`, so it always sees the current-round evolved input:
+
+```typescript
+const approaches = [
+  (input: string) => input,
+  (input: string) => `${input}\n\nApproach: write the equation first, then substitute.`,
+  (input: string) => `${input}\n\nApproach: identify the common mistake for this type, then avoid it.`,
+];
+
+await EvalRunner.refine({
+  dataset, target, beamWidth: 3, rounds: 2, scorers,
+  buildBeamInput: (input, beamIndex) =>
+    approaches[beamIndex % approaches.length](input as string) as typeof input,
+});
+```
+
+**Concurrency.** `concurrency` gates the number of concurrent **cases** (default `1`). Beam candidates within a single case always run in parallel, so the effective number of simultaneous LLM requests is `concurrency × beamWidth`.
+
+**Return value — `RefineReport`:**
+- `rounds` — one `EvalReport` per round; index `0` is the first round
+- `final` — same object as `rounds[rounds.length - 1]`
+- `improvement` — `final.passRate - rounds[0].passRate`; `0` when only one round ran
+
+Requires `rounds >= 1` and `beamWidth >= 1` (throws otherwise).
+
+See [`examples/10-refine.ts`](examples/10-refine.ts) (mock target, no API key required) and [`examples/11-math-refine.ts`](examples/11-math-refine.ts) (Claude Haiku, requires `ANTHROPIC_API_KEY`).
+
 ## PDF / document extraction
 
 `Scorer.fieldAccuracy` handles the messy reality of LLM extraction output — currency symbols, number formatting, boolean strings — so you don't have to normalise before comparing.
@@ -521,5 +584,11 @@ interface EvalReport<TInput = string> {
 // Structural — satisfied by any Agention Pipeline, AgentGraph, or GraphNode
 interface EvalTarget<TInput = string> {
   execute(input: TInput): Promise<string | { toString(): string }>;
+}
+
+interface RefineReport<TInput = string> {
+  rounds: EvalReport<TInput>[];  // one per round; index 0 = first round
+  final: EvalReport<TInput>;     // same as rounds[rounds.length - 1]
+  improvement: number;           // passRate delta: final.passRate - rounds[0].passRate; 0 when only one round ran
 }
 ```
