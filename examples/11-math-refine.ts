@@ -177,8 +177,9 @@ EvalRunner.refine({
     console.log(`\nRound ${round + 1}: ${report.passed}/${report.total} passed`);
     for (const c of report.cases) {
       const got = parseAnswer(c.output);
+      const score = c.scores[0]?.score ?? 0;
       const status = c.pass ? '✓' : '✗';
-      console.log(`  ${status} ${c.case.name}: got ${got ?? '?'} (expected ${c.case.expected})`);
+      console.log(`  ${status} ${c.case.name}: got ${got ?? '?'} (expected ${c.case.expected}) score=${score.toFixed(2)}`);
     }
   },
 })
@@ -186,5 +187,36 @@ EvalRunner.refine({
     console.log('\n--- Final report ---');
     console.log(formatReport(report.final));
     console.log(`Improvement: ${report.improvement >= 0 ? '+' : ''}${(report.improvement * 100).toFixed(0)}pp pass rate`);
+
+    // For cases that improved across rounds, show the reasoning the model got
+    // wrong, the corrected reasoning, and the exact evolved prompt that was fed
+    // back — so you can understand what made self-correction work.
+    const first = report.rounds[0];
+    const last = report.rounds[report.rounds.length - 1];
+    const improved = first.cases
+      .map((r1, i) => ({ r1, rN: last.cases[i], i }))
+      .filter(({ r1, rN }) => !r1.pass && rN.pass);
+
+    if (improved.length > 0) {
+      console.log('\n--- What changed ---');
+      for (const { r1, rN, i } of improved) {
+        const r1reasoning = extractReasoning(r1.output);
+        const rNreasoning = extractReasoning(rN.output);
+        console.log(`\n✓ ${r1.case.name}`);
+        console.log(`  Round 1 reasoning (wrong):\n    ${r1reasoning.replace(/\n/g, '\n    ')}`);
+        console.log(`  Final reasoning (correct):\n    ${rNreasoning.replace(/\n/g, '\n    ')}`);
+        console.log(`\n  Evolved prompt that produced the fix (roundInputs[${report.rounds.length - 1}][${i}]):`);
+        console.log(`    ${String(report.roundInputs[report.rounds.length - 1][i]).replace(/\n/g, '\n    ')}`);
+      }
+    }
   })
   .catch(console.error);
+
+function extractReasoning(output: string): string {
+  try {
+    const cleaned = output.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+    return JSON.parse(cleaned)?.reasoning ?? output;
+  } catch {
+    return output;
+  }
+}

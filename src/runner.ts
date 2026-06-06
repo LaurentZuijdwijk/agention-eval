@@ -249,8 +249,10 @@ export class EvalRunner<TInput = string> {
     const semaphore = new Semaphore(concurrency);
     const currentInputs = dataset.cases.map((c) => c.input);
     const roundReports: EvalReport<TInput>[] = [];
+    const roundInputSnapshots: TInput[][] = [];
 
     for (let round = 0; round < rounds; round++) {
+      roundInputSnapshots.push([...currentInputs]);
       const roundResults: EvalCaseResult<TInput>[] = new Array(dataset.size);
       const roundStart = Date.now();
 
@@ -344,7 +346,7 @@ export class EvalRunner<TInput = string> {
     const final = roundReports[roundReports.length - 1];
     const improvement =
       roundReports.length > 1 ? final.passRate - roundReports[0].passRate : 0;
-    return { rounds: roundReports, final, improvement };
+    return { rounds: roundReports, final, improvement, roundInputs: roundInputSnapshots };
   }
 }
 

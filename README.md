@@ -216,6 +216,7 @@ await EvalRunner.refine({
 - `rounds` — one `EvalReport` per round; index `0` is the first round
 - `final` — same object as `rounds[rounds.length - 1]`
 - `improvement` — `final.passRate - rounds[0].passRate`; `0` when only one round ran
+- `roundInputs` — `roundInputs[r][i]` is the input actually used for case `i` in round `r`; use `roundInputs[1][i]` to see the evolved prompt that drove improvement in round 1, or `roundInputs[rounds.length - 1][i]` for the most refined version to redeploy
 
 Requires `rounds >= 1` and `beamWidth >= 1` (throws otherwise).
 
@@ -590,5 +591,6 @@ interface RefineReport<TInput = string> {
   rounds: EvalReport<TInput>[];  // one per round; index 0 = first round
   final: EvalReport<TInput>;     // same as rounds[rounds.length - 1]
   improvement: number;           // passRate delta: final.passRate - rounds[0].passRate; 0 when only one round ran
+  roundInputs: TInput[][];       // roundInputs[r][i] = input used for case i in round r
 }
 ```

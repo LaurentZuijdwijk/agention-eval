@@ -104,4 +104,8 @@ export interface RefineReport<TInput = string> {
   rounds: EvalReport<TInput>[];  // one per round, index 0 = first round
   final: EvalReport<TInput>;     // same as rounds[rounds.length - 1]
   improvement: number;           // passRate delta: final.passRate - rounds[0].passRate; 0 when only one round ran
+  // Inputs actually used in each round: roundInputs[r][i] = input for case i in round r.
+  // roundInputs[0] is always the original dataset inputs; roundInputs[1] is what buildInput
+  // produced after round 0 (i.e. the evolved prompt that drove improvement in round 1).
+  roundInputs: TInput[][];
 }
